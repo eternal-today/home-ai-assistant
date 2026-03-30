@@ -181,6 +181,17 @@ body::before { content:''; position:fixed; inset:0; pointer-events:none; z-index
         <div class="srow">
           <label class="slb">Gemini API 키</label>
           <input class="sin" id="set-gemini" type="password" placeholder="AIza..."/>
+          <label class="slb" style="margin-top:.35rem">Google Cloud TTS API 키 (선택)</label>
+          <input class="sin" id="set-tts" type="password" placeholder="AIza... (입력 시 자동 전환)"/>
+        </div>
+        <div class="stit" style="margin-top:.4rem">Wake word</div>
+        <div class="srow">
+          <label class="slb">Python 서버 포트 (기본: 8765)</label>
+          <input class="sin" id="set-wake-port" type="text" placeholder="8765"/>
+          <button class="action-btn" id="wake-connect-btn">
+            <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg>
+            <span id="wake-lbl">Wake word 연결</span>
+          </button>
         </div>
         <div class="stit" style="margin-top:.4rem">캘린더</div>
         <div class="srow">
@@ -279,6 +290,8 @@ const saveC = () => localStorage.setItem(CK, JSON.stringify(cfg));
 
 function fillCfg() {
   if (cfg.gk)    G('set-gemini').value = cfg.gk;
+  if (cfg.tts)    G('set-tts').value = cfg.tts;
+  if (cfg.wakePort) G('set-wake-port').value = cfg.wakePort;
   if (cfg.cal)   G('set-cal').value    = cfg.cal;
   if (cfg.calId) G('set-cal-id').value = cfg.calId;
   if (cfg.tgt)   G('set-tg-tok').value = cfg.tgt;
@@ -288,7 +301,9 @@ function fillCfg() {
 }
 
 G('save-btn').addEventListener('click', () => {
-  cfg.gk    = G('set-gemini').value.trim();
+  cfg.gk       = G('set-gemini').value.trim();
+  cfg.tts      = G('set-tts').value.trim();
+  cfg.wakePort = G('set-wake-port').value.trim() || '8765';
   cfg.cal   = G('set-cal').value.trim();
   cfg.calId = G('set-cal-id').value.trim();
   cfg.tgt   = G('set-tg-tok').value.trim();
@@ -357,23 +372,53 @@ function showTyping() {
 }
 function rmTyping() { const e = G('typing'); if (e) e.remove(); }
 
-/* ── TTS: 첫 글자 잘림 방지 + 전처리 ── */
-function speak(text) {
+/* ── TTS ── */
+let ttsAudio = null;
+
+async function speak(text) {
+  // 진행 중인 TTS 중단
   window.speechSynthesis.cancel();
-  // 짧은 무음 구간용 더미 utterance로 오디오 엔진 워밍업
-  const dummy = new SpeechSynthesisUtterance(' ');
-  dummy.volume = 0; dummy.lang = 'ko-KR';
-  window.speechSynthesis.speak(dummy);
+  if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
 
   const ttsText = cleanForTTS(cleanText(text));
+  G('stop-btn').classList.add('visible');
+
+  // Google Cloud TTS API 키가 있으면 고품질 TTS 사용
+  if (cfg.tts) {
+    try {
+      const res = await fetch('https://texttospeech.googleapis.com/v1/text:synthesize?key=' + cfg.tts, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input: { text: ttsText },
+          voice: { languageCode: 'ko-KR', name: 'ko-KR-Wavenet-A', ssmlGender: 'FEMALE' },
+          audioConfig: { audioEncoding: 'MP3', speakingRate: 1.05, pitch: 0 }
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const audio = new Audio('data:audio/mp3;base64,' + data.audioContent);
+        ttsAudio = audio;
+        audio.onended = audio.onerror = () => { G('stop-btn').classList.remove('visible'); ttsAudio = null; };
+        audio.play();
+        return;
+      }
+    } catch (e) { console.warn('Google TTS 실패, 브라우저 TTS로 대체:', e); }
+  }
+
+  // 브라우저 내장 TTS (fallback) - 더미로 첫 글자 잘림 방지
+  const dummy = new SpeechSynthesisUtterance(' ');
+  dummy.volume = 0; dummy.lang = 'ko-KR';
+  window.speechSynthesis.speak(dummy);
   const u = new SpeechSynthesisUtterance(ttsText);
   u.lang = 'ko-KR'; u.rate = 1.05;
-  u.onstart = () => G('stop-btn').classList.add('visible');
   u.onend = u.onerror = () => G('stop-btn').classList.remove('visible');
   window.speechSynthesis.speak(u);
 }
+
 G('stop-btn').addEventListener('click', () => {
   window.speechSynthesis.cancel();
+  if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
   G('stop-btn').classList.remove('visible');
 });
 
@@ -390,6 +435,42 @@ micBtn.addEventListener('click', () => {
   recog.onerror  = e => { micBtn.classList.remove('mic-on'); recog = null; if (e.error !== 'no-speech') toast('음성 오류: ' + e.error, 'err'); };
   recog.start();
 });
+
+/* ── Wake word WebSocket ── */
+let wakeWs = null;
+
+function connectWake() {
+  const port = cfg.wakePort || '8765';
+  const lbl = G('wake-lbl'), btn = G('wake-connect-btn');
+  if (wakeWs) { wakeWs.close(); wakeWs = null; lbl.textContent = 'Wake word 연결'; btn.classList.remove('connected'); return; }
+
+  wakeWs = new WebSocket('ws://localhost:' + port);
+  wakeWs.onopen = () => {
+    lbl.textContent = '연결됨 (대기 중)';
+    btn.classList.add('connected');
+    toast('Wake word 서버 연결됐어요', 'ok');
+  };
+  wakeWs.onmessage = (e) => {
+    if (e.data === 'WAKE') {
+      toast('Wake word 감지!', 'ok');
+      // 자동으로 음성 인식 시작
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR || recog) return;
+      recog = new SR(); recog.lang = 'ko-KR'; recog.interimResults = false;
+      recog.onstart  = () => micBtn.classList.add('mic-on');
+      recog.onend    = () => { micBtn.classList.remove('mic-on'); recog = null; };
+      recog.onresult = ev => { const t = ev.results[0][0].transcript; G('msg-input').value = t; send(t); };
+      recog.onerror  = ev => { micBtn.classList.remove('mic-on'); recog = null; };
+      recog.start();
+    }
+  };
+  wakeWs.onclose = () => {
+    wakeWs = null;
+    lbl.textContent = 'Wake word 연결';
+    btn.classList.remove('connected');
+  };
+  wakeWs.onerror = () => toast('Wake word 서버 연결 실패. Python 스크립트가 실행 중인지 확인해주세요', 'err');
+}
 
 /* ── Google Calendar (GIS) ── */
 let calAccessToken = null;
@@ -755,6 +836,8 @@ async function send(text, extra) {
     speak('오류가 발생했어요.'); toast(err.message, 'err');
   }
 }
+
+G('wake-connect-btn').addEventListener('click', connectWake);
 
 /* ── 알림 권한 ── */
 if (Notification.permission === 'default') Notification.requestPermission();
