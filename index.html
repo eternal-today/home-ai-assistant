@@ -27,7 +27,7 @@
 }
 
 html, body {
-  height: 100%; background: var(--bg);
+  height: 100%; height: 100dvh; background: var(--bg);
   color: var(--w50); font-family: var(--font);
   font-weight: 400; overflow: hidden;
   -webkit-font-smoothing: antialiased;
@@ -42,7 +42,7 @@ body::before {
 
 /* ── 그리드 ── */
 #app {
-  position: relative; z-index: 1; height: 100vh;
+  position: relative; z-index: 1; height: 100vh; height: 100dvh; height: calc(var(--vh, 1vh) * 100);
   display: grid;
   grid-template-columns: 1fr 320px;
   grid-template-rows: 68px 1fr 76px;
@@ -183,7 +183,7 @@ body::before {
   color: var(--w25); cursor: pointer; letter-spacing: .03em;
   transition: all .15s;
 }
-.tab.on { color: var(--w80); border-bottom-color: var(--w50); }
+.tab.on { color: var(--w100); border-bottom-color: var(--w80); font-weight: 700; }
 .tab:hover:not(.on) { color: var(--w50); }
 
 .panel { display: none; flex: 1; flex-direction: column; overflow-y: auto; padding: .875rem; gap: .45rem; scrollbar-width: thin; scrollbar-color: var(--s3) transparent; }
@@ -406,6 +406,13 @@ G('save-btn').addEventListener('click',()=>{
   if(fb){try{cfg.fb=JSON.parse(fb)}catch{toast('Firebase JSON 오류','err');return;}}
   saveC(); toast('저장됐어요','ok');
 });
+
+/* ── 뷰포트 높이 보정 (모바일 브라우저 주소창 대응) ── */
+function setVh() {
+  document.documentElement.style.setProperty('--vh', window.innerHeight * 0.01 + 'px');
+}
+setVh();
+window.addEventListener('resize', setVh);
 
 /* ── 시계 ── */
 const DN=['일','월','화','수','목','금','토'];
