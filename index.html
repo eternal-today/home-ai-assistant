@@ -106,6 +106,11 @@ body::before { content:''; position:fixed; inset:0; pointer-events:none; z-index
 .action-btn:hover { border-color:var(--b1); color:var(--w70); }
 .action-btn.connected { border-color:rgba(90,158,114,.35); color:var(--ok); }
 
+/* Wake 상태 */
+.pill.active { border-color:rgba(90,158,114,.6); }
+.pill.active .pill-dot { background:var(--ok); animation:dpulse .8s ease-in-out infinite; }
+.pill.active span:last-child { color:var(--ok); }
+
 /* 앰비언트 */
 #amb { display:none; position:fixed; inset:0; z-index:200; background:#040404; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; }
 #amb.on { display:flex; }
@@ -210,10 +215,17 @@ body::before { content:''; position:fixed; inset:0; pointer-events:none; z-index
           <input class="sin" id="set-tg-tok" type="password" placeholder="1234567890:ABC..."/>
           <label class="slb" style="margin-top:.35rem">내 Chat ID</label>
           <input class="sin" id="set-tg-id" type="text" placeholder="숫자만 입력"/>
+          <label class="slb" style="margin-top:.35rem">와이프 Chat ID</label>
+          <input class="sin" id="set-tg-id2" type="text" placeholder="숫자만 입력 (알림 동시 발송)"/>
           <button class="action-btn" id="tg-test-btn">
             <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
             <span>테스트 메시지 보내기</span>
           </button>
+        </div>
+        <div class="stit" style="margin-top:.4rem">건강 관리 앱</div>
+        <div class="srow">
+          <label class="slb">Apps Script URL</label>
+          <input class="sin" id="set-health-url" type="text" placeholder="https://script.google.com/macros/s/..."/>
         </div>
         <div class="stit" style="margin-top:.4rem">Firebase (추후)</div>
         <div class="srow">
@@ -296,6 +308,8 @@ function fillCfg() {
   if (cfg.calId) G('set-cal-id').value = cfg.calId;
   if (cfg.tgt)   G('set-tg-tok').value = cfg.tgt;
   if (cfg.tgi)   G('set-tg-id').value  = cfg.tgi;
+  if (cfg.tgi2)  G('set-tg-id2').value = cfg.tgi2;
+  if (cfg.healthUrl) G('set-health-url').value = cfg.healthUrl;
   if (cfg.fb)    G('set-fb').value     = JSON.stringify(cfg.fb, null, 2);
   updCalBtn();
 }
@@ -306,8 +320,10 @@ G('save-btn').addEventListener('click', () => {
   cfg.wakePort = G('set-wake-port').value.trim() || '8765';
   cfg.cal   = G('set-cal').value.trim();
   cfg.calId = G('set-cal-id').value.trim();
-  cfg.tgt   = G('set-tg-tok').value.trim();
-  cfg.tgi   = G('set-tg-id').value.trim();
+  cfg.tgt       = G('set-tg-tok').value.trim();
+  cfg.tgi       = G('set-tg-id').value.trim();
+  cfg.tgi2      = G('set-tg-id2').value.trim();
+  cfg.healthUrl = G('set-health-url').value.trim();
   const fb  = G('set-fb').value.trim();
   if (fb) { try { cfg.fb = JSON.parse(fb); } catch { toast('Firebase JSON 오류', 'err'); return; } }
   saveC(); toast('저장됐어요', 'ok');
@@ -397,11 +413,13 @@ async function speak(text) {
       });
       if (res.ok) {
         const data = await res.json();
-        const audio = new Audio('data:audio/mp3;base64,' + data.audioContent);
-        ttsAudio = audio;
-        audio.onended = audio.onerror = () => { G('stop-btn').classList.remove('visible'); ttsAudio = null; };
-        audio.play();
-        return;
+        return new Promise(resolve => {
+          const audio = new Audio('data:audio/mp3;base64,' + data.audioContent);
+          ttsAudio = audio;
+          audio.onended = () => { G('stop-btn').classList.remove('visible'); ttsAudio = null; resolve(); };
+          audio.onerror = () => { G('stop-btn').classList.remove('visible'); ttsAudio = null; resolve(); };
+          audio.play();
+        });
       }
     } catch (e) { console.warn('Google TTS 실패, 브라우저 TTS로 대체:', e); }
   }
@@ -436,6 +454,31 @@ micBtn.addEventListener('click', () => {
   recog.start();
 });
 
+/* ── Wake 상태 관리 ── */
+function setWakeState(state) {
+  const pill = document.querySelector('.pill');
+  if (state === 'active') {
+    pill.classList.add('active');
+  } else {
+    pill.classList.remove('active');
+  }
+}
+
+function beep(freq, dur) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = freq;
+    osc.type = 'sine';
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur / 1000);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + dur / 1000);
+  } catch(e) {}
+}
+
 /* ── Wake word WebSocket ── */
 let wakeWs = null;
 
@@ -452,15 +495,17 @@ function connectWake() {
   };
   wakeWs.onmessage = (e) => {
     if (e.data === 'WAKE') {
-      toast('Wake word 감지!', 'ok');
+      // 짧은 삐 소리
+      beep(880, 120);
+      setWakeState('active');
       // 자동으로 음성 인식 시작
       const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SR || recog) return;
       recog = new SR(); recog.lang = 'ko-KR'; recog.interimResults = false;
       recog.onstart  = () => micBtn.classList.add('mic-on');
-      recog.onend    = () => { micBtn.classList.remove('mic-on'); recog = null; };
+      recog.onend    = () => { micBtn.classList.remove('mic-on'); recog = null; setWakeState('sleep'); };
       recog.onresult = ev => { const t = ev.results[0][0].transcript; G('msg-input').value = t; send(t); };
-      recog.onerror  = ev => { micBtn.classList.remove('mic-on'); recog = null; };
+      recog.onerror  = ev => { micBtn.classList.remove('mic-on'); recog = null; setWakeState('sleep'); };
       recog.start();
     }
   };
@@ -554,12 +599,19 @@ async function tgSend(chatId, text) {
   } catch { return false; }
 }
 
+/* 모든 등록된 채팅방에 동시 발송 */
+async function tgBroadcast(text) {
+  const ids = [cfg.tgi, cfg.tgi2].filter(Boolean);
+  await Promise.all(ids.map(id => tgSend(id, text)));
+}
+
 G('tg-test-btn').addEventListener('click', async () => {
   const tok = G('set-tg-tok').value.trim() || cfg.tgt;
   const id  = G('set-tg-id').value.trim()  || cfg.tgi;
   if (!tok || !id) { toast('Bot Token과 Chat ID를 먼저 입력해주세요', 'err'); return; }
   cfg.tgt = tok; cfg.tgi = id; saveC();
   const ok = await tgSend(id, '똑띠 연결 테스트 메시지입니다.');
+  if (cfg.tgi2) tgSend(cfg.tgi2, '똑띠 연결 테스트 메시지입니다.');
   toast(ok ? '테스트 메시지 전송됐어요' : '전송 실패. Token/ID를 확인해주세요', ok ? 'ok' : 'err');
 });
 
@@ -586,7 +638,7 @@ async function tgPoll() {
         rmTyping();
         const cleaned = cleanText(parseCmd(raw));
         appendMsg('ai', cleaned); speak(cleaned);
-        await tgSend(cfg.tgi, cleaned);
+        await tgBroadcast(cleaned);
       } catch (err) { rmTyping(); appendMsg('ai', '오류: ' + err.message); }
     }
   } catch { /* 폴링 오류 무시 */ }
@@ -620,7 +672,10 @@ const SYS = `당신은 '똑띠'라는 이름의 가족 AI 어시스턴트입니�
 역할: 일정 안내, 리마인드 저장/삭제, 쇼핑 목록 관리/삭제, 날씨/뉴스 검색, 타이머, 대화 상대.
 
 명령 태그(답변 맨 앞에 포함):
-[REMIND:내용:시간또는null] [SHOP:내용] [TIMER:초] [DEL_REMIND:키워드] [DEL_SHOP:키워드]`;
+[REMIND:내용:시간또는null] [SHOP:내용] [TIMER:초] [DEL_REMIND:키워드] [DEL_SHOP:키워드] [HEALTH_SAVE:대상자:유형:내용] [HEALTH_QUERY:대상자]
+
+건강 기록 저장 예: [HEALTH_SAVE:아빠:병원방문:두통으로 내과 방문, 진통제 처방]
+건강 조회 예: [HEALTH_QUERY:아들]`;
 
 async function callGemini(userText, extra) {
   if (!cfg.gk) return '설정 탭에서 Gemini API 키를 입력해주세요.';
@@ -637,6 +692,20 @@ async function callGemini(userText, extra) {
   return d.candidates?.[0]?.content?.parts?.[0]?.text || '응답을 받지 못했어요.';
 }
 
+/* ── 건강 관리 앱 연동 ── */
+async function callHealthApp(action, params) {
+  if (!cfg.healthUrl) return null;
+  try {
+    const r = await fetch(cfg.healthUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, ...params })
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (e) { console.warn('건강앱 연동 오류:', e); return null; }
+}
+
 /* ── 명령 파싱 ── */
 function parseCmd(text) {
   let s = text;
@@ -650,29 +719,62 @@ function parseCmd(text) {
   if (drm) { delRemind(drm[1].trim()); s=s.replace(drm[0],'').trim(); }
   const dsm = s.match(/\[DEL_SHOP:([^\]]+)\]/);
   if (dsm) { delShop(dsm[1].trim()); s=s.replace(dsm[0],'').trim(); }
+
+  // 건강 기록 저장
+  const hsm = s.match(/\[HEALTH_SAVE:([^:]+):([^:]+):([^\]]+)\]/);
+  if (hsm) {
+    const [_, member, type, content] = hsm;
+    callHealthApp('saveHealthRecord', {
+      member: member.trim(), type: type.trim(), content: content.trim(),
+      date: new Date().toISOString().split('T')[0], institution: '', memo: ''
+    }).then(res => {
+      if (res && res.success) toast('건강 기록 저장됐어요', 'ok');
+    });
+    s = s.replace(hsm[0], '').trim();
+  }
+
   return s;
 }
 
-/* ── 리마인드 시간 파싱 ── */
+/* ── 리마인드 시간 파싱 (내일 + X시 Y분 전 지원) ── */
 function parseRemindTime(ts) {
   if (!ts || ts === 'null') return null;
   const now = new Date();
-  // 상대시간
+
+  // 상대시간: "2시간 후", "30분 후"
   const relH = ts.match(/(\d+)\s*시간/);
-  const relM = ts.match(/(\d+)\s*분/);
+  const relM = ts.match(/(\d+)\s*분\s*후/);
   if (relH || relM) {
     const h = relH ? parseInt(relH[1]) : 0;
     const m = relM ? parseInt(relM[1]) : 0;
     return now.getTime() + (h*60+m)*60*1000;
   }
-  // 절대시간
+
+  // "X시 Y분 전" 처리: 예) "10시 5분 전" → 9시 55분
+  const beforeM = ts.match(/(\d{1,2})\s*시\s*(\d+)\s*분\s*전/);
+  if (beforeM) {
+    let h = parseInt(beforeM[1]), m = parseInt(beforeM[2]);
+    const total = h * 60 - m; // 분 단위로 변환 후 빼기
+    h = Math.floor(total / 60);
+    m = total % 60;
+    const t = new Date(now);
+    const isTomorrow = ts.includes('내일');
+    if (isTomorrow) t.setDate(t.getDate() + 1);
+    t.setHours(h, m, 0, 0);
+    if (!isTomorrow && t <= now) t.setDate(t.getDate() + 1);
+    return t.getTime();
+  }
+
+  // 절대시간: "오후 3시", "15:00", "내일 10시"
   const abs = ts.match(/(\d{1,2})[:시](\d{0,2})?/);
   if (abs) {
     let h = parseInt(abs[1]); const m = parseInt(abs[2]||'0');
     if (ts.includes('오후') && h < 12) h += 12;
     if (ts.includes('오전') && h === 12) h = 0;
-    const t = new Date(now); t.setHours(h, m, 0, 0);
-    if (t <= now) t.setDate(t.getDate()+1);
+    const t = new Date(now);
+    if (ts.includes('내일')) t.setDate(t.getDate() + 1);
+    t.setHours(h, m, 0, 0);
+    if (!ts.includes('내일') && t <= now) t.setDate(t.getDate() + 1);
     return t.getTime();
   }
   return null;
@@ -687,7 +789,7 @@ function addRemind(text, ts) {
   reminds.unshift({ id: Date.now()+'', text, at, done: false, createdAt: Date.now(), alerted: false });
   saveR(); renderDash(); toast('리마인드 저장됐어요', 'ok');
   const tgMsg = at ? '저장됐어요: ' + text + ' (' + fmtT(at) + ' 알림 예정)' : '저장됐어요: ' + text;
-  tgSend(cfg.tgi, tgMsg);
+  tgBroadcast(tgMsg);
 }
 
 function delRemind(keyword) {
@@ -784,7 +886,7 @@ function checkAlerts() {
       toast('알림: ' + r.text, 'ok');
       speak('알림이에요. ' + r.text);
       if (Notification.permission === 'granted') new Notification('똑띠', { body: r.text });
-      tgSend(cfg.tgi, '알림 시간이 됐어요: ' + r.text);
+      tgBroadcast('알림 시간이 됐어요: ' + r.text);
     }
   });
   if (changed) { saveR(); renderDash(); }
@@ -804,7 +906,7 @@ function startTimer(sec) {
       clearInterval(timerIv);
       toast('타이머 종료!', 'ok'); speak('타이머가 종료됐어요.');
       if (Notification.permission === 'granted') new Notification('똑띠', { body: '타이머 종료!' });
-      tgSend(cfg.tgi, '타이머 종료!');
+      tgBroadcast('타이머 종료!');
     }
   }, 1000);
 }
@@ -829,11 +931,14 @@ async function send(text, extra) {
     const raw = await callGemini(text, ctx || '');
     rmTyping();
     const cleaned = cleanText(parseCmd(raw));
-    appendMsg('ai', cleaned); speak(cleaned);
+    appendMsg('ai', cleaned);
+    await speak(cleaned);
+    setWakeState('sleep');
   } catch (err) {
     rmTyping();
     appendMsg('ai', '오류가 발생했어요: ' + err.message);
     speak('오류가 발생했어요.'); toast(err.message, 'err');
+    setWakeState('sleep');
   }
 }
 
