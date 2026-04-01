@@ -259,7 +259,7 @@ function isToday(ts) {
 }
 function todayEnd() { const d = new Date(); d.setHours(23,59,59,999); return d.getTime(); }
 
-/* ── 텍스트 정제 (마크다운 + 이모지) ── */
+/* ── 텍스트 정제 ── */
 function cleanText(t) {
   return t
     .replace(/\*\*([^*]+)\*\*/g, '$1')
@@ -278,17 +278,13 @@ function cleanText(t) {
 /* ── TTS 전처리 ── */
 function cleanForTTS(t) {
   return t
-    // 괄호 내용 제거 (서울 시간 기준 등)
     .replace(/\([^)]*\)/g, '')
-    // 온도: 15°C → 15도, 15℃ → 15도
     .replace(/(-?\d+(?:\.\d+)?)\s*[°℃]C?/g, '$1도')
-    // 숫자+) → 서수 (1) → 첫째, 등)
     .replace(/(\d+)\)\s*/g, (_, n) => {
       const nums = ['','첫째','둘째','셋째','넷째','다섯째','여섯째','일곱째','여덟째','아홉째','열째'];
       const i = parseInt(n);
       return (i < nums.length ? nums[i] : i + '번째') + ', ';
     })
-    // % 기호 → 퍼센트
     .replace(/(\d+)\s*%/g, '$1퍼센트')
     .replace(/\s{2,}/g, ' ')
     .trim();
@@ -301,30 +297,30 @@ let cfg = loadC();
 const saveC = () => localStorage.setItem(CK, JSON.stringify(cfg));
 
 function fillCfg() {
-  if (cfg.gk)    G('set-gemini').value = cfg.gk;
-  if (cfg.tts)    G('set-tts').value = cfg.tts;
-  if (cfg.wakePort) G('set-wake-port').value = cfg.wakePort;
-  if (cfg.cal)   G('set-cal').value    = cfg.cal;
-  if (cfg.calId) G('set-cal-id').value = cfg.calId;
-  if (cfg.tgt)   G('set-tg-tok').value = cfg.tgt;
-  if (cfg.tgi)   G('set-tg-id').value  = cfg.tgi;
-  if (cfg.tgi2)  G('set-tg-id2').value = cfg.tgi2;
+  if (cfg.gk)       G('set-gemini').value    = cfg.gk;
+  if (cfg.tts)      G('set-tts').value        = cfg.tts;
+  if (cfg.wakePort) G('set-wake-port').value  = cfg.wakePort;
+  if (cfg.cal)      G('set-cal').value         = cfg.cal;
+  if (cfg.calId)    G('set-cal-id').value      = cfg.calId;
+  if (cfg.tgt)      G('set-tg-tok').value      = cfg.tgt;
+  if (cfg.tgi)      G('set-tg-id').value       = cfg.tgi;
+  if (cfg.tgi2)     G('set-tg-id2').value      = cfg.tgi2;
   if (cfg.healthUrl) G('set-health-url').value = cfg.healthUrl;
-  if (cfg.fb)    G('set-fb').value     = JSON.stringify(cfg.fb, null, 2);
+  if (cfg.fb)       G('set-fb').value          = JSON.stringify(cfg.fb, null, 2);
   updCalBtn();
 }
 
 G('save-btn').addEventListener('click', () => {
-  cfg.gk       = G('set-gemini').value.trim();
-  cfg.tts      = G('set-tts').value.trim();
-  cfg.wakePort = G('set-wake-port').value.trim() || '8765';
-  cfg.cal   = G('set-cal').value.trim();
-  cfg.calId = G('set-cal-id').value.trim();
+  cfg.gk        = G('set-gemini').value.trim();
+  cfg.tts       = G('set-tts').value.trim();
+  cfg.wakePort  = G('set-wake-port').value.trim() || '8765';
+  cfg.cal       = G('set-cal').value.trim();
+  cfg.calId     = G('set-cal-id').value.trim();
   cfg.tgt       = G('set-tg-tok').value.trim();
   cfg.tgi       = G('set-tg-id').value.trim();
   cfg.tgi2      = G('set-tg-id2').value.trim();
   cfg.healthUrl = G('set-health-url').value.trim();
-  const fb  = G('set-fb').value.trim();
+  const fb = G('set-fb').value.trim();
   if (fb) { try { cfg.fb = JSON.parse(fb); } catch { toast('Firebase JSON 오류', 'err'); return; } }
   saveC(); toast('저장됐어요', 'ok');
   startTgPolling();
@@ -392,14 +388,11 @@ function rmTyping() { const e = G('typing'); if (e) e.remove(); }
 let ttsAudio = null;
 
 async function speak(text) {
-  // 진행 중인 TTS 중단
   window.speechSynthesis.cancel();
   if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
-
   const ttsText = cleanForTTS(cleanText(text));
   G('stop-btn').classList.add('visible');
 
-  // Google Cloud TTS API 키가 있으면 고품질 TTS 사용
   if (cfg.tts) {
     try {
       const res = await fetch('https://texttospeech.googleapis.com/v1/text:synthesize?key=' + cfg.tts, {
@@ -424,8 +417,7 @@ async function speak(text) {
     } catch (e) { console.warn('Google TTS 실패, 브라우저 TTS로 대체:', e); }
   }
 
-  // 브라우저 내장 TTS (fallback) - 더미로 첫 글자 잘림 방지
-  const dummy = new SpeechSynthesisUtterance(' ');
+  const dummy = new SpeechSynthesisUtterance(' ');
   dummy.volume = 0; dummy.lang = 'ko-KR';
   window.speechSynthesis.speak(dummy);
   const u = new SpeechSynthesisUtterance(ttsText);
@@ -457,11 +449,8 @@ micBtn.addEventListener('click', () => {
 /* ── Wake 상태 관리 ── */
 function setWakeState(state) {
   const pill = document.querySelector('.pill');
-  if (state === 'active') {
-    pill.classList.add('active');
-  } else {
-    pill.classList.remove('active');
-  }
+  if (state === 'active') pill.classList.add('active');
+  else pill.classList.remove('active');
 }
 
 function beep(freq, dur) {
@@ -470,12 +459,10 @@ function beep(freq, dur) {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain); gain.connect(ctx.destination);
-    osc.frequency.value = freq;
-    osc.type = 'sine';
+    osc.frequency.value = freq; osc.type = 'sine';
     gain.gain.setValueAtTime(0.15, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur / 1000);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + dur / 1000);
+    osc.start(ctx.currentTime); osc.stop(ctx.currentTime + dur / 1000);
   } catch(e) {}
 }
 
@@ -486,19 +473,12 @@ function connectWake() {
   const port = cfg.wakePort || '8765';
   const lbl = G('wake-lbl'), btn = G('wake-connect-btn');
   if (wakeWs) { wakeWs.close(); wakeWs = null; lbl.textContent = 'Wake word 연결'; btn.classList.remove('connected'); return; }
-
   wakeWs = new WebSocket('ws://localhost:' + port);
-  wakeWs.onopen = () => {
-    lbl.textContent = '연결됨 (대기 중)';
-    btn.classList.add('connected');
-    toast('Wake word 서버 연결됐어요', 'ok');
-  };
+  wakeWs.onopen = () => { lbl.textContent = '연결됨 (대기 중)'; btn.classList.add('connected'); toast('Wake word 서버 연결됐어요', 'ok'); };
   wakeWs.onmessage = (e) => {
     if (e.data === 'WAKE') {
-      // 짧은 삐 소리
       beep(880, 120);
       setWakeState('active');
-      // 자동으로 음성 인식 시작
       const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SR || recog) return;
       recog = new SR(); recog.lang = 'ko-KR'; recog.interimResults = false;
@@ -509,16 +489,15 @@ function connectWake() {
       recog.start();
     }
   };
-  wakeWs.onclose = () => {
-    wakeWs = null;
-    lbl.textContent = 'Wake word 연결';
-    btn.classList.remove('connected');
-  };
+  wakeWs.onclose = () => { wakeWs = null; lbl.textContent = 'Wake word 연결'; btn.classList.remove('connected'); };
   wakeWs.onerror = () => toast('Wake word 서버 연결 실패. Python 스크립트가 실행 중인지 확인해주세요', 'err');
 }
 
-/* ── Google Calendar (GIS) ── */
+/* ── Google Calendar (GIS) + 자동 재연결 (v11) ── */
 let calAccessToken = null;
+let calTokenClient = null;   // TokenClient 재사용
+let calWarnTimer   = null;   // 만료 5분 전 경고 타이머
+let calExpireTimer = null;   // 만료 시 자동 재연결 타이머
 
 function updCalBtn() {
   const btn = G('cal-btn'), lbl = G('cal-lbl');
@@ -534,36 +513,61 @@ function initGapiClient() {
   });
 }
 
+/* 토큰 발급 성공 시 공통 처리 */
+function onCalTokenReceived(resp, isAutoRenew) {
+  if (resp.error) {
+    if (!isAutoRenew) toast('연결 실패: ' + resp.error, 'err');
+    return;
+  }
+  calAccessToken = resp.access_token;
+  gapi.client.setToken({ access_token: calAccessToken });
+  updCalBtn();
+
+  // 기존 타이머 초기화
+  clearTimeout(calWarnTimer);
+  clearTimeout(calExpireTimer);
+
+  // 55분 후 만료 → 자동 재연결 시도 (prompt 없이)
+  // 50분 후 경고 토스트
+  calWarnTimer = setTimeout(() => {
+    toast('캘린더 토큰이 5분 후 만료돼요. 잠시 후 자동으로 갱신합니다.', '');
+  }, 50 * 60 * 1000);
+
+  calExpireTimer = setTimeout(() => {
+    calAccessToken = null;
+    updCalBtn();
+    // prompt 없이 조용히 재시도 (이미 동의된 상태)
+    if (calTokenClient) {
+      calTokenClient.requestAccessToken({ prompt: '' });
+    }
+  }, 55 * 60 * 1000);
+
+  if (!isAutoRenew) toast('캘린더 연결됐어요', 'ok');
+}
+
 G('cal-btn').addEventListener('click', () => {
   const clientId = G('set-cal').value.trim() || cfg.cal;
   if (!clientId) { toast('Client ID를 먼저 입력하고 저장해주세요', 'err'); return; }
   cfg.cal = clientId; cfg.calId = G('set-cal-id').value.trim() || cfg.calId; saveC();
-  const tc = google.accounts.oauth2.initTokenClient({
+
+  // TokenClient 생성 (처음 한 번만, 이후엔 재사용)
+  calTokenClient = google.accounts.oauth2.initTokenClient({
     client_id: clientId,
     scope: 'https://www.googleapis.com/auth/calendar.readonly',
-    callback: (resp) => {
-      if (resp.error) { toast('연결 실패: ' + resp.error, 'err'); return; }
-      calAccessToken = resp.access_token;
-      gapi.client.setToken({ access_token: calAccessToken });
-      setTimeout(() => { calAccessToken = null; updCalBtn(); toast('캘린더 토큰 만료. 다시 연결해주세요', 'err'); }, 55*60*1000);
-      updCalBtn(); toast('캘린더 연결됐어요', 'ok');
-    }
+    callback: (resp) => onCalTokenReceived(resp, false)
   });
-  tc.requestAccessToken({ prompt: 'consent' });
+  calTokenClient.requestAccessToken({ prompt: 'consent' });
 });
 
-/* 캘린더 조회: 오늘~이번 주 토요일 (지난 날짜 제외) */
+/* 캘린더 조회: 오늘~이번 주 토요일 */
 async function fetchCalendar() {
   if (!calAccessToken) return null;
   const calId = cfg.calId || 'primary';
   try {
     const now = new Date();
-    // 오늘 자정부터
     const tMin = new Date(now); tMin.setHours(0,0,0,0);
-    // 이번 주 토요일 끝
     const daysLeft = 6 - now.getDay();
     const tMax = new Date(now); tMax.setDate(now.getDate() + daysLeft); tMax.setHours(23,59,59,999);
-
     const res = await gapi.client.calendar.events.list({
       calendarId: calId, timeMin: tMin.toISOString(), timeMax: tMax.toISOString(),
       singleEvents: true, orderBy: 'startTime', maxResults: 30
@@ -599,7 +603,6 @@ async function tgSend(chatId, text) {
   } catch { return false; }
 }
 
-/* 모든 등록된 채팅방에 동시 발송 */
 async function tgBroadcast(text) {
   const ids = [cfg.tgi, cfg.tgi2].filter(Boolean);
   await Promise.all(ids.map(id => tgSend(id, text)));
@@ -697,8 +700,7 @@ async function callHealthApp(action, params) {
   if (!cfg.healthUrl) return null;
   try {
     const r = await fetch(cfg.healthUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, ...params })
     });
     if (!r.ok) return null;
@@ -719,29 +721,22 @@ function parseCmd(text) {
   if (drm) { delRemind(drm[1].trim()); s=s.replace(drm[0],'').trim(); }
   const dsm = s.match(/\[DEL_SHOP:([^\]]+)\]/);
   if (dsm) { delShop(dsm[1].trim()); s=s.replace(dsm[0],'').trim(); }
-
-  // 건강 기록 저장
   const hsm = s.match(/\[HEALTH_SAVE:([^:]+):([^:]+):([^\]]+)\]/);
   if (hsm) {
     const [_, member, type, content] = hsm;
     callHealthApp('saveHealthRecord', {
       member: member.trim(), type: type.trim(), content: content.trim(),
       date: new Date().toISOString().split('T')[0], institution: '', memo: ''
-    }).then(res => {
-      if (res && res.success) toast('건강 기록 저장됐어요', 'ok');
-    });
+    }).then(res => { if (res && res.success) toast('건강 기록 저장됐어요', 'ok'); });
     s = s.replace(hsm[0], '').trim();
   }
-
   return s;
 }
 
-/* ── 리마인드 시간 파싱 (내일 + X시 Y분 전 지원) ── */
+/* ── 리마인드 시간 파싱 ── */
 function parseRemindTime(ts) {
   if (!ts || ts === 'null') return null;
   const now = new Date();
-
-  // 상대시간: "2시간 후", "30분 후"
   const relH = ts.match(/(\d+)\s*시간/);
   const relM = ts.match(/(\d+)\s*분\s*후/);
   if (relH || relM) {
@@ -749,14 +744,11 @@ function parseRemindTime(ts) {
     const m = relM ? parseInt(relM[1]) : 0;
     return now.getTime() + (h*60+m)*60*1000;
   }
-
-  // "X시 Y분 전" 처리: 예) "10시 5분 전" → 9시 55분
   const beforeM = ts.match(/(\d{1,2})\s*시\s*(\d+)\s*분\s*전/);
   if (beforeM) {
     let h = parseInt(beforeM[1]), m = parseInt(beforeM[2]);
-    const total = h * 60 - m; // 분 단위로 변환 후 빼기
-    h = Math.floor(total / 60);
-    m = total % 60;
+    const total = h * 60 - m;
+    h = Math.floor(total / 60); m = total % 60;
     const t = new Date(now);
     const isTomorrow = ts.includes('내일');
     if (isTomorrow) t.setDate(t.getDate() + 1);
@@ -764,8 +756,6 @@ function parseRemindTime(ts) {
     if (!isTomorrow && t <= now) t.setDate(t.getDate() + 1);
     return t.getTime();
   }
-
-  // 절대시간: "오후 3시", "15:00", "내일 10시"
   const abs = ts.match(/(\d{1,2})[:시](\d{0,2})?/);
   if (abs) {
     let h = parseInt(abs[1]); const m = parseInt(abs[2]||'0');
@@ -817,8 +807,7 @@ function delShop(keyword) {
 function renderDash() { renderToday(); renderR(); renderS(); }
 
 function renderToday() {
-  const list = G('today-list');
-  list.innerHTML = '';
+  const list = G('today-list'); list.innerHTML = '';
   const now = Date.now(), end = todayEnd();
   const items = reminds.filter(r => !r.done && r.at && r.at >= now && r.at <= end);
   items.sort((a,b) => a.at - b.at);
@@ -829,8 +818,7 @@ function renderToday() {
 }
 
 function renderR() {
-  const list = G('r-list'), emp = G('r-empty');
-  list.innerHTML = '';
+  const list = G('r-list'), emp = G('r-empty'); list.innerHTML = '';
   const now = Date.now(), end = todayEnd();
   const others = reminds.filter(r => !(r.at && r.at >= now && r.at <= end));
   if (!others.length) { emp.style.display = ''; return; }
@@ -839,8 +827,7 @@ function renderR() {
 }
 
 function renderS() {
-  const list = G('s-list'), emp = G('s-empty');
-  list.innerHTML = '';
+  const list = G('s-list'), emp = G('s-empty'); list.innerHTML = '';
   if (!shops.length) { emp.style.display = ''; return; }
   emp.style.display = 'none';
   shops.forEach(r => list.appendChild(mkShopItem(r)));
@@ -876,10 +863,9 @@ function mkShopItem(r) {
   d.append(left, del); return d;
 }
 
-/* ── 리마인드 알림 체크 (30초마다 + 페이지 로드 즉시) ── */
+/* ── 리마인드 알림 체크 ── */
 function checkAlerts() {
-  const now = Date.now();
-  let changed = false;
+  const now = Date.now(); let changed = false;
   reminds.forEach(r => {
     if (!r.done && r.at && r.at <= now && !r.alerted) {
       r.alerted = true; changed = true;
@@ -892,7 +878,6 @@ function checkAlerts() {
   if (changed) { saveR(); renderDash(); }
 }
 setInterval(checkAlerts, 30000);
-// 페이지 로드 시 즉시 체크 (로드 직후 지난 알림 처리)
 setTimeout(checkAlerts, 1000);
 
 /* ── 타이머 ── */
