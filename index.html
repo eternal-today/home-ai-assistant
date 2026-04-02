@@ -816,12 +816,12 @@ async function loadReminds() {
 function renderReminds(reminds, containerId) {
   const container = document.getElementById(containerId);
   container.innerHTML = '';
-  if (!reminds.length) {
+  const active = reminds.filter(r => !r.alerted && !r.done);
+  if (!active.length) {
     container.innerHTML = '<div class="empty-msg">리마인드가 없어요</div>';
     return;
   }
-  const now = Date.now();
-  reminds.forEach(r => {
+  active.forEach(r => {
     const div = document.createElement('div');
     div.className = 'remind-item' + (r.done ? ' done' : '');
     div.innerHTML =
