@@ -842,7 +842,7 @@ function renderSidebarReminds(reminds) {
   const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
 
   const todayReminds = reminds.filter(r =>
-    !r.done && r.at && r.at >= today.getTime() && r.at < tomorrow.getTime()
+    !r.done && !r.alerted && r.at && r.at >= today.getTime() && r.at < tomorrow.getTime()
   );
 
   if (!todayReminds.length) {
